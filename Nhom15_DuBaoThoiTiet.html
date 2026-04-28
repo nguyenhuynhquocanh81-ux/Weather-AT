@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Weather Pro UI</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<style>
+
+/* RESET */
+*{margin:0;padding:0;box-sizing:border-box}
+
+body{
+  font-family:'Lexend',sans-serif;
+  background:linear-gradient(135deg,#fff7ed,#ffedd5);
+}
+
+/* CONTAINER */
+.container{
+  max-width:1200px;
+  margin:30px auto;
+  display:grid;
+  grid-template-columns:2fr 1fr;
+  gap:20px;
+}
+
+/* LEFT */
+.left{
+  display:flex;
+  flex-direction:column;
+  gap:20px;
+}
+
+/* CARD */
+.card{
+  border-radius:20px;
+  padding:20px;
+  box-shadow:0 10px 30px rgba(0,0,0,0.1);
+}
+
+/* MAIN */
+.main-weather{
+  background:linear-gradient(135deg,#f97316,#fb923c);
+  color:white;
+}
+
+/* SEARCH */
+.search input{
+  padding:10px;
+  border-radius:10px;
+  border:none;
+  width:70%;
+}
+
+.search button{
+  padding:10px;
+  border:none;
+  border-radius:10px;
+  cursor:pointer;
+  background:black;
+  color:white;
+}
+
+/* TIME */
+.time{
+  font-size:40px;
+  margin:10px 0;
+}
+
+/* CHART + MAP */
+.chart-card{
+  background:white;
+}
+
+#map{
+  height:250px;
+  border-radius:15px;
+  margin-top:15px;
+}
+
+/* EXTRA */
+.extra{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:20px;
+}
+
+.box{
+  background:linear-gradient(135deg,#fff7ed,#ffedd5);
+  height:100px;
+  border-radius:20px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:600;
+}
+
+/* SIDEBAR */
+.sidebar{
+  background:linear-gradient(180deg,#ea580c,#7c2d12);
+  color:white;
+  border-radius:20px;
+  padding:20px;
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+}
+
+.current{
+  text-align:center;
+}
+
+.current h2{
+  font-size:40px;
+}
+
+/* HOURLY */
+.hourly{
+  display:flex;
+  overflow-x:auto;
+  gap:10px;
+  margin:15px 0;
+}
+
+.hour-box{
+  min-width:70px;
+  background:rgba(255,255,255,0.2);
+  padding:10px;
+  border-radius:12px;
+  text-align:center;
+  font-size:12px;
+}
+
+.hour-box img{
+  width:30px;
+}
+
+/* FORECAST */
+.day{
+  display:flex;
+  justify-content:space-between;
+  padding:10px 0;
+  border-bottom:1px solid rgba(255,255,255,0.2);
+}
+
+/* MOBILE */
+@media(max-width:900px){
+  .container{
+    grid-template-columns:1fr;
+  }
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <!-- LEFT -->
+  <div class="left">
+
+    <div class="card main-weather">
+
+      <div class="search">
+        <input type="text" id="cityInput" placeholder="Nhập thành phố...">
+        <button onclick="searchWeather()">Tìm</button>
+      </div>
+
+      <h3 id="location">--</h3>
+      <div class="time" id="time">--:--</div>
+      <h2 id="desc">--</h2>
+
+    </div>
+
+    <div class="card chart-card">
+      <canvas id="tempChart"></canvas>
+      <div id="map"></div>
+    </div>
+
+    <div class="extra">
+      <div class="box" id="humidity">Humidity: --%</div>
+      <div class="box" id="wind">Wind: -- km/h</div>
+    </div>
+
+  </div>
+
+  <!-- RIGHT -->
+  <div class="sidebar">
+
+    <div>
+      <div class="current">
+        <h2 id="temp">--°C</h2>
+        <p id="status">--</p>
+      </div>
+
+      <div class="hourly" id="hourlyList"></div>
+      <div id="forecastList"></div>
+    </div>
+
+    <div style="text-align:center;margin-top:20px">
+      🌤 Weather App
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+
+const API_KEY = "bf2a6b7f64786f0f06ec482f8bff0397";
+let chart;
+
+/* TIME */
+setInterval(()=>{
+  const now = new Date();
+  document.getElementById("time").innerText =
+    now.toLocaleTimeString();
+},1000);
+
+/* SEARCH */
+function searchWeather(){
+  let city = document.getElementById("cityInput").value.trim();
+  if(city === "") city = "Ho Chi Minh City";
+  getWeather(city);
+}
+
+/* MAP */
+const map = L.map('map').setView([10.7769,106.7009],10);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png')
+.addTo(map);
+
+let marker;
+
+map.on("click", function(e){
+  const lat = e.latlng.lat;
+  const lon = e.latlng.lng;
+
+  if(marker) marker.remove();
+  marker = L.marker([lat,lon]).addTo(map);
+
+  getWeatherByCoords(lat,lon);
+});
+
+/* WEATHER BY COORD */
+async function getWeatherByCoords(lat,lon){
+  const res = await fetch(
+    `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric`
+  );
+  const data = await res.json();
+
+  document.getElementById("temp").innerText =
+    Math.round(data.main.temp) + "°C";
+
+  document.getElementById("status").innerText =
+    data.weather[0].description;
+
+  document.getElementById("location").innerText =
+    data.name;
+}
+
+/* MAIN WEATHER */
+async function getWeather(city="Ho Chi Minh City"){
+  try {
+
+    const currentRes = await fetch(
+      `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=metric`
+    );
+    const currentData = await currentRes.json();
+
+    if(currentRes.status !== 200){
+      alert(currentData.message);
+      return;
+    }
+
+    const forecastRes = await fetch(
+      `https://api.openweathermap.org/data/2.5/forecast?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=metric`
+    );
+    const forecastData = await forecastRes.json();
+
+    /* CURRENT */
+    document.getElementById("temp").innerText =
+      Math.round(currentData.main.temp) + "°C";
+
+    document.getElementById("status").innerText =
+      currentData.weather[0].description;
+
+    document.getElementById("desc").innerText =
+      currentData.weather[0].description;
+
+    document.getElementById("humidity").innerText =
+      "Humidity: " + currentData.main.humidity + "%";
+
+    document.getElementById("wind").innerText =
+      "Wind: " + currentData.wind.speed + " km/h";
+
+    document.getElementById("location").innerText =
+      currentData.name;
+
+    /* FORECAST NGÀY */
+    const forecastEl = document.getElementById("forecastList");
+    forecastEl.innerHTML = "";
+
+    const daily = forecastData.list.filter(i =>
+      i.dt_txt.includes("12:00:00")
+    );
+
+    daily.slice(0,5).forEach(d=>{
+      const date = new Date(d.dt_txt);
+      const day = date.toLocaleDateString("vi-VN",{weekday:"short"});
+
+      forecastEl.innerHTML += `
+        <div class="day">
+          <span>${day}</span>
+          <span>${Math.round(d.main.temp)}°C</span>
+        </div>
+      `;
+    });
+
+    /* HOURLY */
+    const hourlyEl = document.getElementById("hourlyList");
+    hourlyEl.innerHTML = "";
+
+    forecastData.list.slice(0,8).forEach(h=>{
+      const time = new Date(h.dt_txt).getHours() + "h";
+      const icon = h.weather[0].icon;
+
+      hourlyEl.innerHTML += `
+        <div class="hour-box">
+          <div>${time}</div>
+          <img src="https://openweathermap.org/img/wn/${icon}.png"/>
+          <div>${Math.round(h.main.temp)}°</div>
+        </div>
+      `;
+    });
+
+    /* CHART */
+    const temps = forecastData.list.slice(0,8).map(i=>i.main.temp);
+    const labels = forecastData.list.slice(0,8).map(i=>{
+      const d = new Date(i.dt_txt);
+      return d.getHours() + "h";
+    });
+
+    if(chart) chart.destroy();
+
+    chart = new Chart(document.getElementById("tempChart"),{
+      type:'line',
+      data:{
+        labels:labels,
+        datasets:[{
+          data:temps,
+          borderWidth:2,
+          fill:false
+        }]
+      },
+      options:{
+        plugins:{legend:{display:false}}
+      }
+    });
+
+  } catch(err){
+    console.log(err);
+    alert("Lỗi API!");
+  }
+}
+
+/* LOAD */
+getWeather();
+
+</script>
+
+</body>
+</html>
